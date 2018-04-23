@@ -1,0 +1,6 @@
+# Options available at https://github.com/rust-lang-nursery/rustfmt/blob/master/src/config.rs
+reorder_imports = true
+reorder_extern_crates = true
+max_width = 160
+# ideal_width = 100
+fn_single_line = true
