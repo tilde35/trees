@@ -1,6 +1,7 @@
 use context_iter::ContextIterator;
 use std;
 
+#[derive(Clone)]
 pub struct Tree<IdType: Copy + Eq, T> {
     id: IdType,
     nodes: Vec<NodeData<T>>,
@@ -21,6 +22,19 @@ impl<IdType: Copy + Eq, T> Tree<IdType, T> {
             cur_idx: 0,
             term_at_idx: self.nodes.len(),
         }
+    }
+
+    pub fn first_root_node(&self) -> Option<Node<IdType>> {
+        if self.nodes.len() == 0 {
+            None
+        } else {
+            let first_node = Node { tree_id: self.id, idx: 0 };
+            Some(first_node.root(self))
+        }
+    }
+
+    pub fn find_first<Predicate: FnMut(&Node<IdType>) -> bool>(&self, predicate: Predicate) -> Option<Node<IdType>> {
+        self.all_nodes().filter(predicate).nth(0)
     }
 }
 
@@ -55,7 +69,15 @@ impl<IdType: Copy + Eq> Node<IdType> {
     pub fn prev_sibling<T>(&self, t: &Tree<IdType, T>) -> Option<Node<IdType>> { self.get(t).prev_sibling.as_node(self.tree_id) }
     pub fn next_sibling<T>(&self, t: &Tree<IdType, T>) -> Option<Node<IdType>> { self.get(t).next_sibling.as_node(self.tree_id) }
     pub fn value<'a, T>(&self, t: &'a Tree<IdType, T>) -> &'a T { &self.get(t).value }
-    pub fn value_mut<'a, T>(&self, t: &'a mut Tree<IdType, T>) -> &'a T { &mut self.get_mut(t).value }
+    pub fn value_mut<'a, T>(&self, t: &'a mut Tree<IdType, T>) -> &'a mut T { &mut self.get_mut(t).value }
+
+    pub fn root<T>(&self, t: &Tree<IdType, T>) -> Node<IdType> {
+        let mut result = *self;
+        while let Some(p) = result.parent(t) {
+            result = p;
+        }
+        result
+    }
 
     pub fn remove<T>(&self, t: &mut Tree<IdType, T>) {
         let indexes = self.get(t).as_indexes();
@@ -90,7 +112,7 @@ impl<IdType: Copy + Eq> Node<IdType> {
         }
     }
 
-    pub fn append_child<T>(&self, t: &mut Tree<IdType, T>, child: Node<IdType>) {
+    pub fn append_child<T>(&self, t: &mut Tree<IdType, T>, child: Node<IdType>) -> Node<IdType> {
         self.validate(t);
         child.remove(t);
 
@@ -113,10 +135,12 @@ impl<IdType: Copy + Eq> Node<IdType> {
             // Update self
             self.valid_get_mut(t).last_child = child.as_idx();
         }
+        child
     }
-    pub fn append_child_value<T>(&self, t: &mut Tree<IdType, T>, child_value: T) {
+    pub fn append_child_value<T>(&self, t: &mut Tree<IdType, T>, child_value: T) -> Node<IdType> {
         let n = t.create_node(child_value);
         self.append_child(t, n);
+        n
     }
 
     /// Removes all child nodes from this node
@@ -126,18 +150,41 @@ impl<IdType: Copy + Eq> Node<IdType> {
         }
     }
 
-    /// Returns a context iterator (requiring the tree reference) for all children of this node.
-    /// Internally, this calls next_sibling for each child record. If the next_sibling value for a
-    /// child is altered, then it may cause issues with the iteration. Be sure to either import
-    /// trees::ContextIterator or use the next_value method.
-    pub fn children<T>(&self, t: &Tree<IdType, T>) -> SiblingIter<IdType, T> { SiblingIter::new(self.first_child(t)) }
-
     /// Returns a standard iterator for all children of this node. Holds a reference to the tree
     /// for the duration of the iterator.
-    pub fn children_iter<'a, T>(&self, t: &'a Tree<IdType, T>) -> ContextFreeSiblingIter<'a, IdType, T> {
+    pub fn children<'a, T>(&self, t: &'a Tree<IdType, T>) -> ContextFreeSiblingIter<'a, IdType, T> {
         let next = self.first_child(t);
         ContextFreeSiblingIter { next, tree: t }
     }
+
+    /// Returns a context iterator (requiring the tree reference) for all children of this node.
+    /// This function can be used in situations where the tree (or its data) needs to be altered
+    /// while iterating over the list of children.
+    ///
+    /// Internally, this calls next_sibling for each child record. Removing upcoming siblings or
+    /// altering their next_sibling value will cause the iterator to go off-track. Memory safety is
+    /// still upheld, but the results will not be as expected or may not terminate.
+    ///
+    /// Be sure to either import trees::ContextIterator or use the next_value method.
+    pub fn children_mut<T>(&self, t: &Tree<IdType, T>) -> SiblingIter<IdType, T> { SiblingIter::new(self.first_child(t)) }
+
+    /// Returns a standard iterator starting with the current node, expanding to all nodes
+    /// underneath this node. The iterator returns a tuple containing the depth (starting with
+    /// zero) and the current node.
+    ///
+    /// This is a depth-first search using pre-order.
+    pub fn depth_first_search<'a, T>(&self, t: &'a Tree<IdType, T>) -> ContextFreeDepthFirstIter<'a, IdType, T> {
+        let iter = self.depth_first_search_mut();
+        ContextFreeDepthFirstIter { iter, context: t }
+    }
+
+    pub fn depth_first_search_mut<T>(&self) -> DepthFirstIter<IdType, T> { DepthFirstIter::new(*self) }
+
+    pub fn find_first<T, Predicate: FnMut(&(usize, Node<IdType>)) -> bool>(&self, t: &Tree<IdType, T>, predicate: Predicate) -> Option<(usize, Node<IdType>)> {
+        self.depth_first_search(t).filter(predicate).nth(0)
+    }
+
+    //pub fn breadth_first_search
 }
 
 struct NodeIndexes {
@@ -146,6 +193,7 @@ struct NodeIndexes {
     next_sibling: NodeIdx,
 }
 
+#[derive(Clone)]
 struct NodeData<T> {
     value: T,
     parent: NodeIdx,
@@ -193,6 +241,87 @@ impl NodeIdx {
             })
         }
     }
+}
+
+pub struct DepthFirstIter<IdType: Copy + Eq, T> {
+    next: Option<Node<IdType>>,
+    parents: Vec<Node<IdType>>,
+    _marker: std::marker::PhantomData<T>,
+}
+impl<IdType: Copy + Eq, T> DepthFirstIter<IdType, T> {
+    fn new(root: Node<IdType>) -> Self {
+        Self {
+            next: Some(root),
+            parents: Vec::new(),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn next_value(&mut self, t: &Tree<IdType, T>) -> Option<(usize, Node<IdType>)> {
+        if let Some(n) = self.next {
+            let depth = self.parents.len();
+            let result = Some((depth, n));
+            if let Some(child) = n.first_child(t) {
+                // Node has children, start there next time
+                self.parents.push(n);
+                self.next = Some(child);
+            } else if let Some(sib) = n.next_sibling(t) {
+                // Node has a sibling, start there next time
+                self.next = Some(sib);
+            } else {
+                // No more children/siblings to process, find a parent's sibling to process
+                let mut parent = self.parents.pop();
+                while let Some(p) = parent {
+                    if let Some(s) = p.next_sibling(t) {
+                        self.next = Some(s);
+                        return result;
+                    }
+                    parent = self.parents.pop();
+                }
+                self.next = None;
+            }
+            result
+        } else {
+            None
+        }
+    }
+
+    pub fn discard_child_results(&mut self, t: &Tree<IdType, T>, cur_depth: usize) {
+        if self.parents.len() > cur_depth {
+            let mut parent = self.parents.pop();
+            while self.parents.len() > cur_depth {
+                parent = self.parents.pop();
+            }
+
+            // Note: Copied from the next_value function
+            while let Some(p) = parent {
+                if let Some(s) = p.next_sibling(t) {
+                    self.next = Some(s);
+                    return;
+                }
+                parent = self.parents.pop();
+            }
+            self.next = None;
+        }
+    }
+}
+impl<IdType: Copy + Eq, T> ContextIterator<Tree<IdType, T>> for DepthFirstIter<IdType, T> {
+    type Item = (usize, Node<IdType>);
+
+    fn next(&mut self, t: &Tree<IdType, T>) -> Option<Self::Item> { self.next_value(t) }
+}
+
+pub struct ContextFreeDepthFirstIter<'a, IdType: Copy + Eq + 'a, T: 'a> {
+    iter: DepthFirstIter<IdType, T>,
+    context: &'a Tree<IdType, T>,
+}
+impl<'a, IdType: Copy + Eq + 'a, T: 'a> ContextFreeDepthFirstIter<'a, IdType, T> {
+    pub fn discard_child_results(&mut self, cur_depth: usize) { self.iter.discard_child_results(self.context, cur_depth) }
+}
+impl<'a, IdType: Copy + Eq + 'a, T: 'a> std::iter::Iterator for ContextFreeDepthFirstIter<'a, IdType, T> {
+    type Item = (usize, Node<IdType>);
+
+    fn next(&mut self) -> Option<Self::Item> { self.iter.next_value(self.context) }
 }
 
 pub struct AllNodesIter<IdType: Copy + Eq> {
