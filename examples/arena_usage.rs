@@ -137,7 +137,39 @@ fn main() {
         }
     }
 
-    // TODO Add prepend_child* functions
-    // TODO Add insert_next_sibling* functions
-    // TODO Add insert_prev_sibling* functions
+    {
+        let mut tree = tree.clone();
+        let t = &mut tree;
+
+        let a = t.find_first(|n| n.value(t) == "Parent A").unwrap();
+        a.prepend_child_value(t, "New Entry".into());
+
+        print_tree(t, "=== Prepend to Parent A ===");
+    }
+
+    {
+        let mut tree = tree.clone();
+        let t = &mut tree;
+
+        let b = t.find_first(|n| n.value(t) == "Parent B").unwrap();
+        b.insert_next_sibling_value(t, "New Next to Parent B".into());
+
+        let c = t.find_first(|n| n.value(t) == "Parent C").unwrap();
+        c.insert_next_sibling_value(t, "New Next to Parent C".into());
+
+        print_tree(t, "=== Insert Next Sibling ===");
+    }
+
+    {
+        let mut tree = tree.clone();
+        let t = &mut tree;
+
+        let a = t.find_first(|n| n.value(t) == "Parent A").unwrap();
+        a.insert_prev_sibling_value(t, "New Prev to Parent A".into());
+
+        let b = t.find_first(|n| n.value(t) == "Parent B").unwrap();
+        b.insert_prev_sibling_value(t, "New Prev to Parent B".into());
+
+        print_tree(t, "=== Insert Prev Sibling ===");
+    }
 }

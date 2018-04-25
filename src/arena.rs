@@ -143,6 +143,101 @@ impl<IdType: Copy + Eq> Node<IdType> {
         n
     }
 
+    pub fn prepend_child<T>(&self, t: &mut Tree<IdType, T>, child: Node<IdType>) -> Node<IdType> {
+        self.validate(t);
+        child.remove(t);
+
+        let first_child = self.valid_get(t).first_child;
+        if first_child.is_none() {
+            // No existing children
+            child.valid_get_mut(t).parent = self.as_idx();
+            let d = self.valid_get_mut(t);
+            d.first_child = child.as_idx();
+            d.last_child = child.as_idx();
+        } else {
+            // Update current first child
+            t.nodes[first_child.idx].prev_sibling = child.as_idx();
+            // Update the new child
+            {
+                let d = child.valid_get_mut(t);
+                d.next_sibling = first_child;
+                d.parent = self.as_idx();
+            }
+            // Update self
+            self.valid_get_mut(t).first_child = child.as_idx();
+        }
+        child
+    }
+    pub fn prepend_child_value<T>(&self, t: &mut Tree<IdType, T>, child_value: T) -> Node<IdType> {
+        let n = t.create_node(child_value);
+        self.prepend_child(t, n);
+        n
+    }
+
+    /// Inserts the specified record immediately after this record. If this record does not have a
+    /// parent, then this method will panic.
+    pub fn insert_next_sibling<T>(&self, t: &mut Tree<IdType, T>, child: Node<IdType>) -> Node<IdType> {
+        let parent = self.parent(t).expect("This node must have a parent node for insert_next_sibling to work.");
+        if parent.last_child(t).unwrap() == *self {
+            // Current node is the last on in the list, this is the same as calling append_child on the parent
+            parent.append_child(t, child)
+        } else {
+            // In this case, the parent node does not need to be updated.
+            self.validate(t);
+            child.remove(t);
+
+            let cur_next = self.next_sibling(t).unwrap();
+
+            {
+                let d = child.valid_get_mut(t);
+                d.parent = parent.as_idx();
+                d.prev_sibling = self.as_idx();
+                d.next_sibling = cur_next.as_idx();
+            }
+            self.valid_get_mut(t).next_sibling = child.as_idx();
+            cur_next.valid_get_mut(t).prev_sibling = child.as_idx();
+
+            child
+        }
+    }
+    pub fn insert_next_sibling_value<T>(&self, t: &mut Tree<IdType, T>, child_value: T) -> Node<IdType> {
+        let n = t.create_node(child_value);
+        self.insert_next_sibling(t, n);
+        n
+    }
+
+    /// Inserts the specified record immediately after this record. If this record does not have a
+    /// parent, then this method will panic.
+    pub fn insert_prev_sibling<T>(&self, t: &mut Tree<IdType, T>, child: Node<IdType>) -> Node<IdType> {
+        let parent = self.parent(t).expect("This node must have a parent node for insert_prev_sibling to work.");
+        if parent.first_child(t).unwrap() == *self {
+            // Current node is the first on in the list, this is the same as calling prepend_child on the parent
+            parent.prepend_child(t, child)
+        } else {
+            // In this case, the parent node does not need to be updated.
+            self.validate(t);
+            child.remove(t);
+
+            let cur_next = self.prev_sibling(t).unwrap();
+
+            {
+                let d = child.valid_get_mut(t);
+                d.parent = parent.as_idx();
+                d.prev_sibling = cur_next.as_idx();
+                d.next_sibling = self.as_idx();
+            }
+            self.valid_get_mut(t).prev_sibling = child.as_idx();
+            cur_next.valid_get_mut(t).next_sibling = child.as_idx();
+
+            child
+        }
+    }
+    pub fn insert_prev_sibling_value<T>(&self, t: &mut Tree<IdType, T>, child_value: T) -> Node<IdType> {
+        let n = t.create_node(child_value);
+        self.insert_prev_sibling(t, n);
+        n
+    }
+
     /// Removes all child nodes from this node
     pub fn remove_children<T>(&self, t: &mut Tree<IdType, T>) {
         while let Some(c) = self.first_child(t) {
